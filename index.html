@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Ciclo de refrigeración por pasos</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: radial-gradient(circle at 30% 20%, #eef6fd 0%, #cddef0 100%);
+    font-family: 'Segoe UI', Roboto, system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 18px;
+  }
+  h1 {
+    color: #0d2c45;
+    font-weight: 700;
+    font-size: 1.4rem;
+    margin: 0 0 4px 0;
+    text-align: center;
+  }
+  .sub {
+    color: #3a678c;
+    margin: 0 0 14px 0;
+    font-size: 0.95rem;
+  }
+  .marco {
+    background: white;
+    padding: 12px;
+    border-radius: 24px;
+    box-shadow: 0 22px 45px rgba(15, 45, 80, 0.28);
+    max-width: 100%;
+  }
+  canvas {
+    display: block;
+    border-radius: 16px;
+    background: #fafdff;
+    max-width: 100%;
+    height: auto;
+  }
+  .botones {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 18px;
+    max-width: 100%;
+  }
+  .btn {
+    font-family: inherit;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: white;
+    border: none;
+    border-radius: 14px;
+    padding: 12px 20px;
+    cursor: pointer;
+    box-shadow: 0 6px 14px rgba(0,0,0,0.15);
+    transition: transform 0.12s, box-shadow 0.12s;
+    min-width: 160px;
+  }
+  .btn:hover { transform: translateY(-2px); box-shadow: 0 10px 18px rgba(0,0,0,0.2); }
+  .btn:active { transform: translateY(0); }
+  .btn.azul    { background: #1e88e5; }
+  .btn.naranja { background: #ef6c00; }
+  .btn.verde   { background: #2e7d32; }
+  .btn.celeste { background: #00acc1; }
+  .btn.play    { background: #37474f; min-width: 180px; }
+  .btn.paso    { background: #616161; }
+  .ayuda {
+    margin-top: 12px;
+    color: #4a6f8f;
+    font-size: 0.85rem;
+    font-style: italic;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<h1>❄️ Ciclo de refrigeración por compresión de vapor</h1>
+<p class="sub">Haz clic en cada paso para detener la animación ahí</p>
+
+<div class="marco">
+  <canvas id="c" width="1000" height="640"></canvas>
+</div>
+
+<div class="botones">
+  <button class="btn azul"    onclick="irAPaso(0)">1 ▶ Compresor</button>
+  <button class="btn naranja" onclick="irAPaso(1)">2 ▶ Condensador</button>
+  <button class="btn verde"   onclick="irAPaso(2)">3 ▶ Válvula</button>
+  <button class="btn celeste" onclick="irAPaso(3)">4 ▶ Evaporador</button>
+  <button class="btn play"    onclick="reproducirTodo()">▶ Reproducir todo</button>
+  <button class="btn paso"    onclick="avanzarPaso()">⏭ Avanzar paso</button>
+</div>
+
+<p class="ayuda">Clic sobre el dibujo = pausar / reanudar</p>
+
+<script>
+(function(){
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+
+  // ---- Nitidez HD ----
+  const DPR = window.devicePixelRatio || 1;
+  const W = 1000, H = 640;
+  canvas.width  = W * DPR;
+  canvas.height = H * DPR;
+  canvas.style.width  = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.scale(DPR, DPR);
+
+  // ---- Colores ----
+  const COL = {
+    compresor:   '#1e88e5',
+    compresorOsc:'#0d47a1',
+    condensador: '#ef6c00',
+    condensadorClaro: '#ffe0b2',
+    valvula:     '#2e7d32',
+    evaporador:  '#00acc1',
+    evaporadorClaro: '#b2ebf2',
+    texto:       '#0d2c45'
+  };
+
+  // ---- Puntos clave ----
+  const P1 = { x: 170, y: 500 };
+  const P2 = { x: 170, y: 140 };
+  const P3 = { x: 830, y: 140 };
+  const P4 = { x: 830, y: 500 };
+
+  // ---- Animación ----
+  let progreso = 0;         // 0 → 4
+  const VELOCIDAD = 0.0065;
+  let pausa = true;         // empieza en pausa en el punto 1
+  let autoAvanzar = false;  // false = se detiene al llegar a cada entero
+  let tiempo = 0;           // para animar pistón
+
+  // ---- Interpolación ----
+  function lerp(a, b, t){ return { x: a.x+(b.x-a.x)*t, y: a.y+(b.y-a.y)*t }; }
+  function posicionParticula(p){
+    if (p <= 1) return lerp(P1, P2, p);
+    if (p <= 2) return lerp(P2, P3, p-1);
+    if (p <= 3) return lerp(P3, P4, p-2);
+    return lerp(P4, P1, p-3);
+  }
+  function colorPorProgreso(p){
+    if (p <= 1) return COL.compresor;
+    if (p <= 2) return COL.condensador;
+    if (p <= 3) return COL.valvula;
+    return COL.evaporador;
+  }
+
+  // ---- Polyfill roundRect ----
+  if (!CanvasRenderingContext2D.prototype.roundRect){
+    CanvasRenderingContext2D.prototype.roundRect = function(x,y,w,h,r){
+      this.beginPath();
+      this.moveTo(x+r,y);
+      this.arcTo(x+w,y,x+w,y+h,r);
+      this.arcTo(x+w,y+h,x,y+h,r);
+      this.arcTo(x,y+h,x,y,r);
+      this.arcTo(x,y,x+w,y,r);
+      this.closePath();
+      return this;
+    };
+  }
+
+  // ---- Tubería gruesa con brillo ----
+  function tuberia(a, b, color, grosor = 8){
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(0,0,0,0.10)';
+    ctx.lineWidth = grosor + 4;
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = grosor;
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+  }
+
+  // ---- Serpentín bonito con curvas suaves ----
+  function dibujarSerpentin(x, y, ancho, alto, vueltas, color, grosor = 8){
+    const paso = ancho / vueltas;
+    const puntos = [];
+
+    // entrada desde la izquierda
+    puntos.push({ x: x, y: y + alto/2 });
+
+    for (let i = 0; i < vueltas; i++){
+      const x0 = x + i*paso;
+      const x1 = x0 + paso;
+      // subida por la izquierda
+      puntos.push({ x: x0 + paso*0.15, y: y });
+      // parte superior
+      puntos.push({ x: x1 - paso*0.15, y: y });
+      // bajada por la derecha
+      puntos.push({ x: x1, y: y + alto });
+      // parte inferior
+      puntos.push({ x: x1 - paso*0.15, y: y + alto });
+      // subida por la izquierda del siguiente tubo
+      if (i < vueltas - 1){
+        puntos.push({ x: x1 + paso*0.15, y: y + alto });
+        puntos.push({ x: x1 + paso*0.15, y: y });
+      } else {
+        puntos.push({ x: x1, y: y + alto });
+      }
+    }
+    // salida hacia la derecha
+    puntos.push({ x: x + ancho, y: y + alto/2 });
+
+    // trazo con curvas suaves
+    function trazar(){
+      ctx.beginPath();
+      ctx.moveTo(puntos[0].x, puntos[0].y);
+      for (let i = 1; i < puntos.length; i++){
+        ctx.lineTo(puntos[i].x, puntos[i].y);
+      }
+    }
+
+    // sombra
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#c8d4dd';
+    ctx.lineWidth = grosor + 5;
+    trazar(); ctx.stroke();
+
+    // color principal
+    ctx.strokeStyle = color;
+    ctx.lineWidth = grosor;
+    trazar(); ctx.stroke();
+
+    // brillo
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+    ctx.lineWidth = 2;
+    trazar(); ctx.stroke();
+  }
+
+  // ---- Aletas decorativas ----
+  function dibujarAletas(x, y, ancho, alto, color){
+    ctx.save();
+    ctx.globalAlpha = 0.35;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    for (let i = 0; i <= ancho; i += 12){
+      ctx.beginPath();
+      ctx.moveTo(x + i, y - 8);
+      ctx.lineTo(x + i, y + alto + 8);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // ---- Flecha de dirección ----
+  function flecha(x, y, angulo, color){
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(angulo);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(10, 0);
+    ctx.lineTo(-8, -7);
+    ctx.lineTo(-8, 7);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // ---- Etiqueta de punto (1-4) ----
+  function etiquetaPunto(num, x, y, color){
+    ctx.beginPath();
+    ctx.arc(x, y, 12, 0, Math.PI*2);
+    ctx.fillStyle = 'white';
+    ctx.fill();
+    ctx.lineWidth = 3.5;
+    ctx.strokeStyle = color;
+    ctx.stroke();
+
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(x-15, y-48, 30, 26, 8);
+    ctx.fill();
+    ctx.fillStyle = 'white';
+    ctx.font = 'bold 16px "Segoe UI", Roboto, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(num, x, y - 34);
+  }
+
+  // ---- Compresor animado ----
+  function dibujarCompresor(){
+    const x = 60, y = 250, w = 160, h = 170;
+
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.2)';
+    ctx.shadowBlur = 14;
+    ctx.shadowOffsetY = 5;
+    ctx.fillStyle = COL.compresor;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, 18);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.strokeStyle = 'white';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, 18);
+    ctx.stroke();
+
+    // pistón
+    const cx = x + w/2, cy = y + h/2 - 15, R = 45;
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, Math.PI*2);
+    ctx.fillStyle = COL.compresorOsc;
+    ctx.fill();
+    ctx.strokeStyle = 'white';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // pistón animado
+    const desp = Math.sin(tiempo * 0.08) * (R * 0.4);
+    ctx.beginPath();
+    ctx.arc(cx, cy + desp, R * 0.5, 0, Math.PI*2);
+    ctx.fillStyle = 'white';
+    ctx.fill();
+    ctx.strokeStyle = COL.compresorOsc;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // aspas girando
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(tiempo * 0.05);
+    ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+    ctx.lineWidth = 2.5;
+    for (let i = 0; i < 4; i++){
+      ctx.beginPath();
+      ctx.moveTo(0,0);
+      ctx.lineTo(R - 10, 0);
+      ctx.stroke();
+      ctx.rotate(Math.PI/2);
+    }
+    ctx.restore();
+
+    // texto
+    ctx.fillStyle = 'white';
+    ctx.font = 'bold 13px "Segoe UI", Roboto, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('COMPRESOR', cx, y + h - 18);
+  }
+
+  // ---- Válvula ----
+  function dibujarValvula(){
+    const x = 800, y = 290, w = 130, h = 100;
+
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.2)';
+    ctx.shadowBlur = 14;
+    ctx.shadowOffsetY = 5;
+    ctx.fillStyle = COL.valvula;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, 14);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.strokeStyle = 'white';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, 14);
+    ctx.stroke();
+
+    // estrechamiento
+    ctx.fillStyle = 'white';
+    ctx.beginPath();
+    ctx.moveTo(x + w*0.2, y + h*0.25);
+    ctx.lineTo(x + w*0.5, y + h*0.5);
+    ctx.lineTo(x + w*0.2, y + h*0.75);
+    ctx.closePath(); ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(x + w*0.8, y + h*0.25);
+    ctx.lineTo(x + w*0.5, y + h*0.5);
+    ctx.lineTo(x + w*0.8, y + h*0.75);
+    ctx.closePath(); ctx.fill();
+
+    ctx.fillStyle = 'white';
+    ctx.font = 'bold 13px "Segoe UI", Roboto, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('VÁLVULA', x + w/2, y + h - 18);
+  }
+
+  // ---- Partícula ----
+  function dibujarParticula(){
+    const pos = posicionParticula(progreso);
+    const color = colorPorProgreso(progreso);
+
+    // halo
+    const halo = ctx.createRadialGradient(pos.x, pos.y, 2, pos.x, pos.y, 26);
+    halo.addColorStop(0, color + 'dd');
+    halo.addColorStop(1, color + '00');
+    ctx.fillStyle = halo;
+    ctx.beginPath(); ctx.arc(pos.x, pos.y, 26, 0, Math.PI*2); ctx.fill();
+
+    // núcleo
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, 11, 0, Math.PI*2);
+    ctx.fillStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 14;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = 'white';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // brillo
+    ctx.beginPath();
+    ctx.arc(pos.x - 4, pos.y - 4, 4, 0, Math.PI*2);
+    ctx.fillStyle = 'white';
+    ctx.fill();
+  }
+
+  // ---- Dibujo principal ----
+  function dibujar(){
+    // fondo
+    const bg = ctx.createLinearGradient(0, 0, W, H);
+    bg.addColorStop(0, '#fbfdff');
+    bg.addColorStop(1, '#e6f0fa');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+
+    // rejilla sutil
+    ctx.strokeStyle = 'rgba(180, 210, 235, 0.25)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < W; i += 40){
+      ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,H); ctx.stroke();
+    }
+    for (let j = 0; j < H; j += 40){
+      ctx.beginPath(); ctx.moveTo(0,j); ctx.lineTo(W,j); ctx.stroke();
+    }
+
+    // tuberías
+    tuberia(P1, P2, COL.compresor);
+    tuberia(P2, P3, COL.condensador);
+    tuberia(P3, P4, COL.valvula);
+    tuberia(P4, P1, COL.evaporador);
+
+    // flechas de dirección
+    flecha((P1.x+P2.x)/2, (P1.y+P2.y)/2, -Math.PI/2, COL.compresor);
+    flecha((P2.x+P3.x)/2, (P2.y+P3.y)/2, 0, COL.condensador);
+    flecha((P3.x+P4.x)/2, (P3.y+P4.y)/2, Math.PI/2, COL.valvula);
+    flecha((P4.x+P1.x)/2, (P4.y+P1.y)/2, Math.PI, COL.evaporador);
+
+    // CONDENSADOR
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.1)';
+    ctx.shadowBlur = 10;
+    ctx.fillStyle = COL.condensadorClaro;
+    ctx.beginPath();
+    ctx.roundRect(310, 60, 380, 160, 16);
+    ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = COL.condensador;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(310, 60, 380, 160, 16);
+    ctx.stroke();
+
+    dibujarAletas(325, 80, 350, 120, COL.condensador);
+    dibujarSerpentin(340, 80, 320, 120, 5, COL.condensador, 9);
+
+    ctx.fillStyle = COL.condensador;
+    ctx.font = 'bold 15px "Segoe UI", Roboto, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('CONDENSADOR', 500, 42);
+    ctx.font = 'italic 12px "Segoe UI", Roboto, sans-serif';
+    ctx.fillStyle = '#a04a00';
+    ctx.fillText('(cede calor al ambiente)', 500, 245);
+
+    // EVAPORADOR
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.1)';
+    ctx.shadowBlur = 10;
+    ctx.fillStyle = COL.evaporadorClaro;
+    ctx.beginPath();
+    ctx.roundRect(310, 420, 380, 160, 16);
+    ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = COL.evaporador;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(310, 420, 380, 160, 16);
+    ctx.stroke();
+
+    dibujarAletas(325, 440, 350, 120, COL.evaporador);
+    dibujarSerpentin(340, 440, 320, 120, 5, COL.evaporador, 9);
+
+    ctx.fillStyle = COL.evaporador;
+    ctx.font = 'bold 15px "Segoe UI", Roboto, sans-serif';
+    ctx.fillText('EVAPORADOR', 500, 405);
+    ctx.font = 'italic 12px "Segoe UI", Roboto, sans-serif';
+    ctx.fillStyle = '#00646e';
+    ctx.fillText('(absorbe calor del espacio frío)', 500, 605);
+
+    // COMPRESOR y VÁLVULA
+    dibujarCompresor();
+    dibujarValvula();
+
+    // PUNTOS 1-4
+    etiquetaPunto('1', P1.x, P1.y, COL.compresor);
+    etiquetaPunto('2', P2.x, P2.y, COL.compresor);
+    etiquetaPunto('3', P3.x, P3.y, COL.condensador);
+    etiquetaPunto('4', P4.x, P4.y, COL.valvula);
+
+    // PARTÍCULA
+    dibujarParticula();
+
+    // TÍTULO
+    ctx.fillStyle = COL.texto;
+    ctx.font = 'bold 20px "Segoe UI", Roboto, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText('Ciclo de refrigeración por compresión de vapor', 25, 32);
+
+    // ESTADO
+    ctx.textAlign = 'right';
+    if (pausa){
+      ctx.fillStyle = '#b71c1c';
+      ctx.font = 'bold 15px "Segoe UI", Roboto, sans-serif';
+      ctx.fillText('⏸ PAUSA', W - 25, 32);
+    } else {
+      ctx.fillStyle = '#2e7d32';
+      ctx.font = 'bold 15px "Segoe UI", Roboto, sans-serif';
+      ctx.fillText('▶ EN MARCHA', W - 25, 32);
+    }
+  }
+
+  // ---- Loop ----
+  function loop(){
+    if (!pausa){
+      progreso += VELOCIDAD;
+      tiempo += 1;
+
+      // Si estamos en modo "autoAvanzar = false", al alcanzar un entero
+      // (1, 2, 3, 4) detenemos la animación exactamente ahí
+      if (!autoAvanzar){
+        for (let limite = 1; limite <= 4; limite++){
+          if (progreso >= limite && progreso < limite + VELOCIDAD){
+            progreso = limite;
+            pausa = true;
+            break;
+          }
+        }
+      }
+
+      // Si estamos en modo automático y llegamos al final, reiniciamos
+      if (autoAvanzar && progreso >= 4){
+        progreso = 0;
+      }
+    }
+    dibujar();
+    requestAnimationFrame(loop);
+  }
+
+  // ---- Controles (llamados por los botones) ----
+  window.irAPaso = function(indice){
+    // indice: 0 → P1, 1 → P2, 2 → P3, 3 → P4
+    progreso = indice;
+    pausa = true;
+    autoAvanzar = false;
+    dibujar();
+  };
+
+  window.reproducirTodo = function(){
+    pausa = false;
+    autoAvanzar = true;
+  };
+
+  window.avanzarPaso = function(){
+    // Avanza al siguiente múltiplo de 1 sin animación intermedia
+    let siguiente = Math.floor(progreso) + 1;
+    if (siguiente > 4) siguiente = 0;
+    progreso = siguiente;
+    pausa = true;
+    autoAvanzar = false;
+    dibujar();
+  };
+
+  // Clic sobre el dibujo: pausar/reanudar
+  canvas.addEventListener('click', () => {
+    pausa = !pausa;
+    if (!pausa) autoAvanzar = true;
+  });
+
+  // ---- Inicio ----
+  loop();
+})();
+</script>
+</body>
+</html>
