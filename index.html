@@ -92,7 +92,7 @@
 <p class="credito">Diseñado por: <b>Juan David López Regalado</b></p>
 
 <div class="marco">
-  <canvas id="c" width="1000" height="640"></canvas>
+  <canvas id="c" width="1000" height="660"></canvas>
 </div>
 
 <div class="botones">
@@ -103,7 +103,7 @@
   <button id="btnPlay" class="btn play" onclick="reproducirTodo()">▶ Reproducir completo</button>
 </div>
 
-<p class="ayuda">Selecciona un paso para ver la bolita recorrerlo en bucle, o reproduce el ciclo completo</p>
+<p class="ayuda">Selecciona un paso para ver la bolita recorrerlo, o reproduce el ciclo completo</p>
 
 <script>
 (function(){
@@ -111,7 +111,7 @@
   const ctx = canvas.getContext('2d');
 
   const DPR = window.devicePixelRatio || 1;
-  const W = 1000, H = 640;
+  const W = 1000, H = 660;
   canvas.width  = W * DPR;
   canvas.height = H * DPR;
   canvas.style.width  = W + 'px';
@@ -136,19 +136,15 @@
   const P4 = { x: 830, y: 500 };
 
   // ---- Estado ----
-  // modo: 'paso' (bolita rebota en un tramo) | 'ciclo' (recorre todo)
   let modo = 'paso';
-  let pasoActual = 0;         // 0..3
-  let direccion = 1;          // 1 = avanza, -1 = retrocede (solo en modo 'paso')
-  let posicion = 0;           // 0..1 dentro del tramo (modo paso)
-  let progreso = 0;           // 0..4 global (modo ciclo)
+  let pasoActual = 0;
+  let posicion = 0;       // 0..1 dentro del tramo
+  let progreso = 0;       // 0..4 global
   let tiempo = 0;
-  const VELOCIDAD = 0.010;    // velocidad de la bolita
+  const VELOCIDAD = 0.010;
 
-  // ---- Interpolación ----
   function lerp(a, b, t){ return { x: a.x+(b.x-a.x)*t, y: a.y+(b.y-a.y)*t }; }
 
-  // Devuelve el segmento (P inicio, P fin) y el color según el paso
   function infoPaso(indice){
     switch(indice){
       case 0: return { ini: P1, fin: P2, color: COL.compresor,   nombre: 'COMPRESOR' };
@@ -171,7 +167,6 @@
     return COL.evaporador;
   }
 
-  // Posición y color actuales según el modo
   function posicionActual(){
     if (modo === 'paso'){
       const info = infoPaso(pasoActual);
@@ -428,7 +423,6 @@
     ctx.fill();
   }
 
-  // ---- Textos según el paso ----
   function textoActual(){
     if (modo === 'ciclo'){
       return 'REPRODUCIENDO CICLO COMPLETO · recorriendo las 4 etapas';
@@ -470,7 +464,7 @@
     flecha((P3.x+P4.x)/2, (P3.y+P4.y)/2, Math.PI/2, COL.valvula);
     flecha((P4.x+P1.x)/2, (P4.y+P1.y)/2, Math.PI, COL.evaporador);
 
-    // Condensador
+    // ---- CONDENSADOR ----
     ctx.save();
     ctx.shadowColor = 'rgba(0,0,0,0.1)';
     ctx.shadowBlur = 10;
@@ -491,12 +485,13 @@
     ctx.fillStyle = COL.condensador;
     ctx.font = 'bold 15px "Segoe UI", Roboto, sans-serif';
     ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
     ctx.fillText('CONDENSADOR', 500, 112);
     ctx.font = 'italic 12px "Segoe UI", Roboto, sans-serif';
     ctx.fillStyle = '#a04a00';
     ctx.fillText('(cede calor al ambiente)', 500, 315);
 
-    // Evaporador
+    // ---- EVAPORADOR ----
     ctx.save();
     ctx.shadowColor = 'rgba(0,0,0,0.1)';
     ctx.shadowBlur = 10;
@@ -517,9 +512,10 @@
     ctx.fillStyle = COL.evaporador;
     ctx.font = 'bold 15px "Segoe UI", Roboto, sans-serif';
     ctx.fillText('EVAPORADOR', 500, 402);
+    // Subimos un poco esta etiqueta para que no choque con la barra inferior
     ctx.font = 'italic 12px "Segoe UI", Roboto, sans-serif';
     ctx.fillStyle = '#00646e';
-    ctx.fillText('(absorbe calor del espacio frío)', 500, 605);
+    ctx.fillText('(absorbe calor del espacio frío)', 500, 600);
 
     dibujarCompresor();
     dibujarValvula();
@@ -542,17 +538,17 @@
     ctx.fillStyle = '#4a6f8f';
     ctx.fillText('Diseñado por: Juan David López Regalado', 25, 68);
 
-    // Barra inferior con descripción
+    // Barra inferior (bajada a y = H-40 para no chocar con evaporador)
     ctx.fillStyle = 'rgba(13, 44, 69, 0.08)';
     ctx.beginPath();
-    ctx.roundRect(20, H - 45, W - 40, 32, 12);
+    ctx.roundRect(20, H - 38, W - 40, 28, 12);
     ctx.fill();
 
     ctx.fillStyle = COL.texto;
-    ctx.font = 'bold 14px "Segoe UI", Roboto, sans-serif';
+    ctx.font = 'bold 13px "Segoe UI", Roboto, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(textoActual(), W/2, H - 29);
+    ctx.fillText(textoActual(), W/2, H - 24);
 
     // Estado arriba a la derecha
     ctx.textAlign = 'right';
@@ -562,21 +558,18 @@
       ctx.fillText('▶ CICLO COMPLETO', W - 25, 45);
     } else {
       ctx.fillStyle = '#b71c1c';
-      ctx.fillText('⏸ PASO ' + (pasoActual + 1), W - 25, 45);
+      ctx.fillText('▶ PASO ' + (pasoActual + 1), W - 25, 45);
     }
   }
 
-  // ---- Loop: mueve la bolita según el modo ----
+  // ---- Loop: la bolita SOLO avanza en un sentido ----
   function loop(){
     tiempo += 1;
 
     if (modo === 'paso'){
-      // Rebota dentro del tramo seleccionado
-      posicion += VELOCIDAD * direccion;
-      if (posicion >= 1){ posicion = 1; direccion = -1; }
-      if (posicion <= 0){ posicion = 0; direccion = 1; }
+      posicion += VELOCIDAD;
+      if (posicion >= 1) posicion = 0;    // reinicia al inicio del tramo
     } else {
-      // Ciclo completo
       progreso += VELOCIDAD * 1.5;
       if (progreso >= 4) progreso = 0;
     }
@@ -594,7 +587,6 @@
     modo = 'paso';
     pasoActual = indice;
     posicion = 0;
-    direccion = 1;
     quitarActivo();
     document.getElementById('btn' + (indice + 1)).classList.add('activo');
   };
@@ -606,7 +598,6 @@
     document.getElementById('btnPlay').classList.add('activo');
   };
 
-  // Al cargar, deja activo el botón del paso 1
   window.addEventListener('load', () => {
     document.getElementById('btn1').classList.add('activo');
   });
