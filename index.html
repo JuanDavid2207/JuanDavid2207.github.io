@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<title>Ciclo de refrigeración por pasos</title>
+<title>Ciclo de refrigeración por compresión de vapor</title>
 <style>
   * { box-sizing: border-box; }
   body {
@@ -71,7 +71,12 @@
   .btn.naranja { background: #ef6c00; }
   .btn.verde   { background: #2e7d32; }
   .btn.celeste { background: #00acc1; }
-  .btn.reiniciar { background: #616161; min-width: 130px; }
+  .btn.play    { background: #37474f; min-width: 210px; }
+  .btn.activo  {
+    outline: 3px solid #ffd54f;
+    outline-offset: 2px;
+    transform: translateY(-2px);
+  }
   .ayuda {
     margin-top: 12px;
     color: #4a6f8f;
@@ -84,21 +89,21 @@
 <body>
 
 <h1>❄️ Ciclo de refrigeración por compresión de vapor</h1>
-<p class="credito">Diseñado por: <b>[Juan David López Regalado]</b></p>
+<p class="credito">Diseñado por: <b>Juan David López Regalado</b></p>
 
 <div class="marco">
   <canvas id="c" width="1000" height="640"></canvas>
 </div>
 
 <div class="botones">
-  <button class="btn azul"    onclick="irAPaso(0)">1 ▶ Compresor</button>
-  <button class="btn naranja" onclick="irAPaso(1)">2 ▶ Condensador</button>
-  <button class="btn verde"   onclick="irAPaso(2)">3 ▶ Válvula</button>
-  <button class="btn celeste" onclick="irAPaso(3)">4 ▶ Evaporador</button>
-  <button class="btn reiniciar" onclick="reiniciar()">↺ Reiniciar</button>
+  <button id="btn1" class="btn azul"    onclick="irAPaso(0)">1 ▶ Compresor</button>
+  <button id="btn2" class="btn naranja" onclick="irAPaso(1)">2 ▶ Condensador</button>
+  <button id="btn3" class="btn verde"   onclick="irAPaso(2)">3 ▶ Válvula</button>
+  <button id="btn4" class="btn celeste" onclick="irAPaso(3)">4 ▶ Evaporador</button>
+  <button id="btnPlay" class="btn play" onclick="reproducirTodo()">▶ Reproducir completo</button>
 </div>
 
-<p class="ayuda">Presiona un botón para ver cada etapa del ciclo</p>
+<p class="ayuda">Selecciona un paso para ver la bolita recorrerlo en bucle, o reproduce el ciclo completo</p>
 
 <script>
 (function(){
@@ -113,7 +118,6 @@
   canvas.style.height = H + 'px';
   ctx.scale(DPR, DPR);
 
-  // ---- Colores ----
   const COL = {
     compresor:   '#1e88e5',
     compresorOsc:'#0d47a1',
@@ -131,14 +135,30 @@
   const P3 = { x: 830, y: 220 };
   const P4 = { x: 830, y: 500 };
 
-  // ---- Estado (inicia en el punto 1) ----
-  let progreso = 0;
+  // ---- Estado ----
+  // modo: 'paso' (bolita rebota en un tramo) | 'ciclo' (recorre todo)
+  let modo = 'paso';
+  let pasoActual = 0;         // 0..3
+  let direccion = 1;          // 1 = avanza, -1 = retrocede (solo en modo 'paso')
+  let posicion = 0;           // 0..1 dentro del tramo (modo paso)
+  let progreso = 0;           // 0..4 global (modo ciclo)
   let tiempo = 0;
-  let estadoActual = 0;   // 0, 1, 2, 3 → qué paso se está mostrando
+  const VELOCIDAD = 0.010;    // velocidad de la bolita
 
   // ---- Interpolación ----
   function lerp(a, b, t){ return { x: a.x+(b.x-a.x)*t, y: a.y+(b.y-a.y)*t }; }
-  function posicionParticula(p){
+
+  // Devuelve el segmento (P inicio, P fin) y el color según el paso
+  function infoPaso(indice){
+    switch(indice){
+      case 0: return { ini: P1, fin: P2, color: COL.compresor,   nombre: 'COMPRESOR' };
+      case 1: return { ini: P2, fin: P3, color: COL.condensador, nombre: 'CONDENSADOR' };
+      case 2: return { ini: P3, fin: P4, color: COL.valvula,     nombre: 'VÁLVULA' };
+      default:return { ini: P4, fin: P1, color: COL.evaporador,  nombre: 'EVAPORADOR' };
+    }
+  }
+
+  function posicionParticulaCiclo(p){
     if (p <= 1) return lerp(P1, P2, p);
     if (p <= 2) return lerp(P2, P3, p-1);
     if (p <= 3) return lerp(P3, P4, p-2);
@@ -151,7 +171,19 @@
     return COL.evaporador;
   }
 
-  // ---- Polyfill roundRect ----
+  // Posición y color actuales según el modo
+  function posicionActual(){
+    if (modo === 'paso'){
+      const info = infoPaso(pasoActual);
+      return lerp(info.ini, info.fin, posicion);
+    }
+    return posicionParticulaCiclo(progreso);
+  }
+  function colorActual(){
+    if (modo === 'paso') return infoPaso(pasoActual).color;
+    return colorPorProgreso(progreso);
+  }
+
   if (!CanvasRenderingContext2D.prototype.roundRect){
     CanvasRenderingContext2D.prototype.roundRect = function(x,y,w,h,r){
       this.beginPath();
@@ -211,17 +243,14 @@
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
-    // contorno
     ctx.strokeStyle = '#c8d4dd';
     ctx.lineWidth = grosor + 5;
     trazar(); ctx.stroke();
 
-    // color principal
     ctx.strokeStyle = color;
     ctx.lineWidth = grosor;
     trazar(); ctx.stroke();
 
-    // brillo
     ctx.strokeStyle = 'rgba(255,255,255,0.55)';
     ctx.lineWidth = 2;
     trazar(); ctx.stroke();
@@ -373,8 +402,8 @@
   }
 
   function dibujarParticula(){
-    const pos = posicionParticula(progreso);
-    const color = colorPorProgreso(progreso);
+    const pos = posicionActual();
+    const color = colorActual();
 
     const halo = ctx.createRadialGradient(pos.x, pos.y, 2, pos.x, pos.y, 26);
     halo.addColorStop(0, color + 'dd');
@@ -399,9 +428,12 @@
     ctx.fill();
   }
 
-  // ---- Etiquetas descriptivas según el paso actual ----
-  function textoDePaso(){
-    switch(estadoActual){
+  // ---- Textos según el paso ----
+  function textoActual(){
+    if (modo === 'ciclo'){
+      return 'REPRODUCIENDO CICLO COMPLETO · recorriendo las 4 etapas';
+    }
+    switch(pasoActual){
       case 0: return 'PASO 1 · El refrigerante se comprime: sube presión y temperatura';
       case 1: return 'PASO 2 · En el condensador cede calor y pasa a líquido';
       case 2: return 'PASO 3 · La válvula reduce la presión bruscamente';
@@ -426,19 +458,19 @@
       ctx.beginPath(); ctx.moveTo(0,j); ctx.lineTo(W,j); ctx.stroke();
     }
 
-    // tuberías
+    // Tuberías
     tuberia(P1, P2, COL.compresor);
     tuberia(P2, P3, COL.condensador);
     tuberia(P3, P4, COL.valvula);
     tuberia(P4, P1, COL.evaporador);
 
-    // flechas
+    // Flechas
     flecha((P1.x+P2.x)/2, (P1.y+P2.y)/2, -Math.PI/2, COL.compresor);
     flecha((P2.x+P3.x)/2, (P2.y+P3.y)/2, 0, COL.condensador);
     flecha((P3.x+P4.x)/2, (P3.y+P4.y)/2, Math.PI/2, COL.valvula);
     flecha((P4.x+P1.x)/2, (P4.y+P1.y)/2, Math.PI, COL.evaporador);
 
-    // ---- CONDENSADOR (más abajo para no chocar con el título) ----
+    // Condensador
     ctx.save();
     ctx.shadowColor = 'rgba(0,0,0,0.1)';
     ctx.shadowBlur = 10;
@@ -464,7 +496,7 @@
     ctx.fillStyle = '#a04a00';
     ctx.fillText('(cede calor al ambiente)', 500, 315);
 
-    // ---- EVAPORADOR ----
+    // Evaporador
     ctx.save();
     ctx.shadowColor = 'rgba(0,0,0,0.1)';
     ctx.shadowBlur = 10;
@@ -499,19 +531,18 @@
 
     dibujarParticula();
 
-    // ---- Título arriba (con más margen) ----
+    // Título
     ctx.fillStyle = COL.texto;
     ctx.font = 'bold 20px "Segoe UI", Roboto, sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
     ctx.fillText('Ciclo de refrigeración por compresión de vapor', 25, 45);
 
-    // ---- Crédito dentro del canvas ----
     ctx.font = 'italic 14px "Segoe UI", Roboto, sans-serif';
     ctx.fillStyle = '#4a6f8f';
-    ctx.fillText('Diseñado por: [Tu nombre aquí]', 25, 68);
+    ctx.fillText('Diseñado por: Juan David López Regalado', 25, 68);
 
-    // ---- Barra inferior con descripción del paso ----
+    // Barra inferior con descripción
     ctx.fillStyle = 'rgba(13, 44, 69, 0.08)';
     ctx.beginPath();
     ctx.roundRect(20, H - 45, W - 40, 32, 12);
@@ -521,36 +552,64 @@
     ctx.font = 'bold 14px "Segoe UI", Roboto, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(textoDePaso(), W/2, H - 29);
+    ctx.fillText(textoActual(), W/2, H - 29);
 
-    // ---- Estado arriba a la derecha ----
+    // Estado arriba a la derecha
     ctx.textAlign = 'right';
     ctx.textBaseline = 'alphabetic';
-    ctx.fillStyle = '#b71c1c';
-    ctx.font = 'bold 15px "Segoe UI", Roboto, sans-serif';
-    ctx.fillText('⏸ MOSTRANDO PASO ' + (estadoActual + 1), W - 25, 45);
+    if (modo === 'ciclo'){
+      ctx.fillStyle = '#2e7d32';
+      ctx.fillText('▶ CICLO COMPLETO', W - 25, 45);
+    } else {
+      ctx.fillStyle = '#b71c1c';
+      ctx.fillText('⏸ PASO ' + (pasoActual + 1), W - 25, 45);
+    }
   }
 
-  // ---- Loop SOLO para animar pistón y aspas (no mueve la bolita) ----
+  // ---- Loop: mueve la bolita según el modo ----
   function loop(){
     tiempo += 1;
+
+    if (modo === 'paso'){
+      // Rebota dentro del tramo seleccionado
+      posicion += VELOCIDAD * direccion;
+      if (posicion >= 1){ posicion = 1; direccion = -1; }
+      if (posicion <= 0){ posicion = 0; direccion = 1; }
+    } else {
+      // Ciclo completo
+      progreso += VELOCIDAD * 1.5;
+      if (progreso >= 4) progreso = 0;
+    }
+
     dibujar();
     requestAnimationFrame(loop);
   }
 
   // ---- Controles ----
+  function quitarActivo(){
+    document.querySelectorAll('.btn').forEach(b => b.classList.remove('activo'));
+  }
+
   window.irAPaso = function(indice){
-    // indice: 0 → P1, 1 → P2, 2 → P3, 3 → P4
-    progreso = indice;
-    estadoActual = indice;
-    dibujar();
+    modo = 'paso';
+    pasoActual = indice;
+    posicion = 0;
+    direccion = 1;
+    quitarActivo();
+    document.getElementById('btn' + (indice + 1)).classList.add('activo');
   };
 
-  window.reiniciar = function(){
+  window.reproducirTodo = function(){
+    modo = 'ciclo';
     progreso = 0;
-    estadoActual = 0;
-    dibujar();
+    quitarActivo();
+    document.getElementById('btnPlay').classList.add('activo');
   };
+
+  // Al cargar, deja activo el botón del paso 1
+  window.addEventListener('load', () => {
+    document.getElementById('btn1').classList.add('activo');
+  });
 
   loop();
 })();
